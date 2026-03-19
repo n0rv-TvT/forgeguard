@@ -3,7 +3,6 @@ package scanner
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -45,20 +44,15 @@ type Step struct {
 
 const maxFileSize = 1024 * 1024 // 1 MB
 
-// Check remote repository for vulnerable files or workflows
-func FetchRemoteRepo(repoURL string) (string, error) {
-	if !strings.HasPrefix(repoURL, "https://github.com/") {
-		return "", fmt.Errorf("only GitHub URLs are supported currently")
-	}
-
-	tempDir, err := os.MkdirTemp("", "forgeguard-remote-*")
-	if err != nil {
-		return "", err
-	}
-
-	err = os.WriteFile(filepath.Join(tempDir, "remote_warning.txt"), []byte("Note: Deep remote scanning requires GitHub API integration."), 0644)
-	return tempDir, err
-}
+var (
+	awsKeyRegex        = regexp.MustCompile(`(?i)AKIA[0-9A-Z]{16}`)
+	githubPatRegex     = regexp.MustCompile(`(?i)(ghp|github_pat)_[a-zA-Z0-9]{36,}`)
+	slackWebhookRegex  = regexp.MustCompile(`https://hooks\.slack\.com/services/T[a-zA-Z0-9_]+/B[a-zA-Z0-9_]+/[a-zA-Z0-9_]+`)
+	genericSecretRegex = regexp.MustCompile(`(?i)(password|passwd|secret|token|api_key)\s*[:=]\s*['"]?[a-zA-Z0-9\-_]{16,}['"]?`)
+	curlBashRegex      = regexp.MustCompile(`(?i)(curl|wget).*\|\s*(bash|sh)`)
+	envInjectRegex     = regexp.MustCompile(`echo\s+['"]?.*?\$\{?.*?\}?.*?['"]?\s*>>\s*\$GITHUB_ENV`)
+	commitShaRegex     = regexp.MustCompile(`^[a-fA-F0-9]{40}$`)
+)
 
 func checkPermissions(perms interface{}, scope string) []Issue {
 	var issues []Issue
@@ -77,16 +71,28 @@ func checkPermissions(perms interface{}, scope string) []Issue {
 		}
 	} else if pMap, ok := perms.(map[string]interface{}); ok {
 		for k, v := range pMap {
-			if v == "write" && (k == "contents" || k == "packages" || k == "security-events" || k == "actions") {
-				issues = append(issues, Issue{
-					Rule:     "Dangerous Token Permission",
-					Severity: "HIGH",
-					Location: scope,
-					PoC:      fmt.Sprintf("permissions:\n  %s: write", k),
-					Exploit:  "A compromised runner extracts the GITHUB_TOKEN and leverages its write access to the specific scope.",
-					Impact:   fmt.Sprintf("Grants write access to %s, allowing attackers to manipulate critical repository components.", k),
-					Fix:      "Ensure this workflow strictly requires write access. Downgrade to 'read' if possible.",
-				})
+			if v == "write" {
+				if k == "id-token" {
+					issues = append(issues, Issue{
+						Rule:     "Dangerous OIDC Token Permission",
+						Severity: "CRITICAL",
+						Location: scope,
+						PoC:      fmt.Sprintf("permissions:\n  %s: write", k),
+						Exploit:  "A compromised runner can mint OIDC tokens to authenticate to cloud providers (AWS, GCP, Azure) and assume highly privileged IAM roles.",
+						Impact:   "Cloud environment compromise (AWS/GCP/Azure) beyond the GitHub repository.",
+						Fix:      "Only grant 'id-token: write' at the job level where it is strictly required, not globally.",
+					})
+				} else if k == "contents" || k == "packages" || k == "security-events" || k == "actions" {
+					issues = append(issues, Issue{
+						Rule:     "Dangerous Token Permission",
+						Severity: "HIGH",
+						Location: scope,
+						PoC:      fmt.Sprintf("permissions:\n  %s: write", k),
+						Exploit:  "A compromised runner extracts the GITHUB_TOKEN and leverages its write access to the specific scope.",
+						Impact:   fmt.Sprintf("Grants write access to %s, allowing attackers to manipulate critical repository components.", k),
+						Fix:      "Ensure this workflow strictly requires write access. Downgrade to 'read' if possible.",
+					})
+				}
 			}
 		}
 	}
@@ -117,6 +123,14 @@ func extractMatch(regex *regexp.Regexp, content string) string {
 	return match
 }
 
+func truncateString(s string, length int) string {
+	s = strings.ReplaceAll(s, "\n", " ")
+	if len(s) > length {
+		return s[:(length/2)-2] + "..." + s[len(s)-(length/2)+1:]
+	}
+	return s
+}
+
 func ScanData(data []byte) ([]Issue, error) {
 	var workflow Workflow
 	if err := yaml.Unmarshal(data, &workflow); err != nil {
@@ -124,12 +138,6 @@ func ScanData(data []byte) ([]Issue, error) {
 	}
 
 	var issues []Issue
-
-	// Expanded regex for secrets
-	awsKeyRegex := regexp.MustCompile(`(?i)AKIA[0-9A-Z]{16}`)
-	githubPatRegex := regexp.MustCompile(`(?i)(ghp|github_pat)_[a-zA-Z0-9]{36,}`)
-	slackWebhookRegex := regexp.MustCompile(`https://hooks\.slack\.com/services/T[a-zA-Z0-9_]+/B[a-zA-Z0-9_]+/[a-zA-Z0-9_]+`)
-	genericSecretRegex := regexp.MustCompile(`(?i)(password|passwd|secret|token|api_key)\s*[:=]\s*['"]?[a-zA-Z0-9\-_]{16,}['"]?`)
 
 	contentStr := string(data)
 	if awsKeyRegex.MatchString(contentStr) {
@@ -165,29 +173,23 @@ func ScanData(data []byte) ([]Issue, error) {
 			Fix:      "Store the webhook URL in GitHub Secrets.",
 		})
 	}
-	if genericSecretRegex.MatchString(contentStr) {
+
+	matches := genericSecretRegex.FindAllString(contentStr, -1)
+	for _, match := range matches {
+		lowerMatch := strings.ToLower(match)
+		if strings.Contains(lowerMatch, "${{") || strings.Contains(lowerMatch, "placeholder") || strings.Contains(lowerMatch, "example") || strings.Contains(lowerMatch, "replace") || strings.Contains(lowerMatch, "dummy") {
+			continue
+		}
 		issues = append(issues, Issue{
 			Rule:     "Potential Hardcoded Secret",
 			Severity: "HIGH",
 			Location: "Global (File content)",
-			PoC:      extractMatch(genericSecretRegex, contentStr),
+			PoC:      truncateString(match, 30),
 			Exploit:  "Attackers use automated tools to scan repos for keywords like 'password' or 'token' followed by high-entropy strings.",
 			Impact:   "Potential unauthorized access to internal services or 3rd-party APIs.",
 			Fix:      "Audit the hardcoded value. If it's a real secret, rotate it and move it to GitHub Secrets.",
 		})
-	}
-
-	nodeRegex := regexp.MustCompile(`(?i)setup-node@v[123]\b`)
-	if nodeRegex.MatchString(contentStr) {
-		issues = append(issues, Issue{
-			Rule:     "Deprecated Action Environment (Node.js)",
-			Severity: "MEDIUM",
-			Location: "Global (File content)",
-			PoC:      extractMatch(nodeRegex, contentStr),
-			Exploit:  "Older Node.js versions have known CVEs. If an attacker can execute code, they can leverage these unpatched vulnerabilities for privilege escalation or container escape.",
-			Impact:   "Increased attack surface on the build runner.",
-			Fix:      "Upgrade to setup-node@v4 or newer.",
-		})
+		break
 	}
 
 	if workflow.Permissions != nil {
@@ -208,18 +210,27 @@ func ScanData(data []byte) ([]Issue, error) {
 		})
 	}
 	if strings.Contains(onString, "workflow_run") {
-		issues = append(issues, Issue{
-			Rule:     "Dangerous Trigger (workflow_run)",
-			Severity: "HIGH",
-			Location: "Workflow 'on' trigger",
-			PoC:      "on: workflow_run",
-			Exploit:  "A privileged workflow is triggered by an unprivileged one. If the privileged workflow downloads and evaluates artifacts from the unprivileged run without validation, an attacker can inject payloads.",
-			Impact:   "Privilege escalation from an untrusted PR to a trusted context.",
-			Fix:      "Thoroughly sanitize any data or artifacts downloaded from the triggering workflow.",
-		})
+		hasDownloadArtifact := false
+		for _, job := range workflow.Jobs {
+			for _, step := range job.Steps {
+				if strings.Contains(step.Uses, "actions/download-artifact") || strings.Contains(step.Run, "gh run download") {
+					hasDownloadArtifact = true
+					break
+				}
+			}
+		}
+		if hasDownloadArtifact {
+			issues = append(issues, Issue{
+				Rule:     "Dangerous Trigger (workflow_run) with Artifact Download",
+				Severity: "HIGH",
+				Location: "Workflow 'on' trigger",
+				PoC:      "on: workflow_run",
+				Exploit:  "A privileged workflow is triggered by an unprivileged one. The privileged workflow downloads and evaluates artifacts from the unprivileged run without validation, allowing code injection.",
+				Impact:   "Privilege escalation from an untrusted PR to a trusted context.",
+				Fix:      "Thoroughly sanitize any data or artifacts downloaded from the triggering workflow.",
+			})
+		}
 	}
-
-	curlBashRegex := regexp.MustCompile(`(?i)(curl|wget).*\|\s*(bash|sh)`)
 
 	for jobName, job := range workflow.Jobs {
 		jobScope := "Job: " + jobName
@@ -247,12 +258,13 @@ func ScanData(data []byte) ([]Issue, error) {
 			}
 
 			if step.Uses != "" {
+				isUnpinned := false
 				if strings.Contains(step.Uses, "@") {
 					parts := strings.Split(step.Uses, "@")
 					if len(parts) == 2 {
 						version := parts[1]
-						matched, _ := regexp.MatchString(`^[a-fA-F0-9]{40}$`, version)
-						if !matched {
+						if !commitShaRegex.MatchString(version) {
+							isUnpinned = true
 							issues = append(issues, Issue{
 								Rule:     "Unpinned Action Dependency",
 								Severity: "HIGH",
@@ -267,15 +279,17 @@ func ScanData(data []byte) ([]Issue, error) {
 				}
 
 				if !strings.HasPrefix(step.Uses, "actions/") && !strings.HasPrefix(step.Uses, "github/") && !strings.HasPrefix(step.Uses, "aws-actions/") && !strings.HasPrefix(step.Uses, "azure/") {
-					issues = append(issues, Issue{
-						Rule:     "Unverified 3rd-Party Action",
-						Severity: "LOW",
-						Location: stepScope,
-						PoC:      "uses: " + step.Uses,
-						Exploit:  "Using actions from individual or unknown developers introduces risk if their account is hijacked or if they become malicious.",
-						Impact:   "Potential for backdoor injection.",
-						Fix:      "Audit the source code of the action, or fork it to a trusted internal registry.",
-					})
+					if !isUnpinned {
+						issues = append(issues, Issue{
+							Rule:     "Unverified 3rd-Party Action",
+							Severity: "LOW",
+							Location: stepScope,
+							PoC:      "uses: " + step.Uses,
+							Exploit:  "Using actions from individual or unknown developers introduces risk if their account is hijacked or if they become malicious.",
+							Impact:   "Potential for backdoor injection.",
+							Fix:      "Audit the source code of the action, or fork it to a trusted internal registry.",
+						})
+					}
 				}
 
 				if strings.Contains(step.Uses, "actions/github-script") {
@@ -286,13 +300,25 @@ func ScanData(data []byte) ([]Issue, error) {
 								Rule:     "GitHub Script Injection",
 								Severity: "CRITICAL",
 								Location: stepScope,
-								PoC:      "script: console.log('${{ github.event.issue.title }}')",
+								PoC:      fmt.Sprintf("script: %s", truncateString(scriptStr, 40)),
 								Exploit:  "An attacker creates an issue or PR with the title: `'); malicious_js_code(); //`. The template interpolates this directly into the javascript source, causing it to execute.",
 								Impact:   "Remote Code Execution (RCE) inside the runner with access to the `github` object and tokens.",
 								Fix:      "Pass untrusted context via environment variables, then access them via `process.env.VAR_NAME`.",
 							})
 						}
 					}
+				}
+
+				if strings.Contains(step.Uses, "actions/setup-node@v1") || strings.Contains(step.Uses, "actions/setup-node@v2") || strings.Contains(step.Uses, "actions/setup-node@v3") {
+					issues = append(issues, Issue{
+						Rule:     "Deprecated Action Environment (Node.js)",
+						Severity: "MEDIUM",
+						Location: stepScope,
+						PoC:      "uses: " + step.Uses,
+						Exploit:  "Older Node.js versions have known CVEs. If an attacker can execute code, they can leverage these unpatched vulnerabilities for privilege escalation or container escape.",
+						Impact:   "Increased attack surface on the build runner.",
+						Fix:      "Upgrade to actions/setup-node@v4 or newer.",
+					})
 				}
 			}
 
@@ -347,7 +373,6 @@ func ScanData(data []byte) ([]Issue, error) {
 					})
 				}
 
-				envInjectRegex := regexp.MustCompile(`echo\s+['"]?.*?\$\{?.*?\}?.*?['"]?\s*>>\s*\$GITHUB_ENV`)
 				if envInjectRegex.MatchString(step.Run) && strings.Contains(step.Run, "${{") {
 					issues = append(issues, Issue{
 						Rule:     "Environment File Injection",

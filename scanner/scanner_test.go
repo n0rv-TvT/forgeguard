@@ -76,8 +76,9 @@ jobs:
   test:
     steps:
       - run: echo "Hello"
+      - uses: actions/download-artifact@v3
 `,
-			expectedRules: []string{"Dangerous Trigger (workflow_run)"},
+			expectedRules: []string{"Dangerous Trigger (workflow_run) with Artifact Download"},
 			mustNotHave:   []string{},
 			expectError:   false,
 		},
