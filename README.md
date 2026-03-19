@@ -22,7 +22,7 @@ $ forgeguard scan .github/workflows/deploy.yml
  |  _| (_) | | | (_| |  __/ |__| | |_| | (_| | |    |_|
  |_|  \___/|_|  \__, |\___|_____/ \__,_|\__,_|_|    (_)
                 |___/                                  
-    CI/CD Supply Chain Security Scanner v1.0.1
+    CI/CD Supply Chain Security Scanner v1.0.2
     
 🔍 Scanning target: .github/workflows/deploy.yml
 

@@ -84,6 +84,12 @@ func ScanGitlabData(data []byte) ([]Issue, error) {
 				for _, s := range sList {
 					if str, ok := s.(string); ok {
 						scripts = append(scripts, str)
+					} else {
+						// Fallback: marshal the map/complex type back to string for regex scanning
+						yamlBytes, err := yaml.Marshal(s)
+						if err == nil {
+							scripts = append(scripts, string(yamlBytes))
+						}
 					}
 				}
 			} else if sStr, ok := scriptInterface.(string); ok {

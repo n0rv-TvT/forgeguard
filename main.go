@@ -11,17 +11,20 @@ import (
 	"forgeguard/scanner"
 )
 
-const version = "1.0.1"
+// Version is injected at build time using -ldflags
+var Version = "dev"
 
-const banner = `
+func getBanner() string {
+	return `
   _____                    _____                     _ 
  |  ___|__  _ __ __ _  ___|  __ \ _   _  __ _ _ __  | |
  | |_ / _ \| '__/ _` + "`" + ` |/ _ \ |  \/| | | |/ _` + "`" + ` | '__| | |
  |  _| (_) | | | (_| |  __/ |__| | |_| | (_| | |    |_|
  |_|  \___/|_|  \__, |\___|_____/ \__,_|\__,_|_|    (_)
                 |___/                                  
-    CI/CD Supply Chain Security Scanner v` + version + `
+    CI/CD Supply Chain Security Scanner v` + Version + `
 `
+}
 
 // Output format for JSON
 type ScanReport struct {
@@ -52,7 +55,7 @@ func printSeverity(sev string) string {
 }
 
 func printUsage() {
-	fmt.Print(banner)
+	fmt.Print(getBanner())
 	fmt.Println("Usage: forgeguard <command> [options] <target>")
 	fmt.Println("\nCommands:")
 	fmt.Println("  scan      Scan a CI/CD configuration file or directory")
@@ -79,7 +82,7 @@ func run() int {
 		fmt.Println("🚀 The 'monitor' command is under development! Stay tuned for real-time CI/CD protection.")
 		return 0
 	case "version", "--version", "-v":
-		fmt.Printf("ForgeGuard v%s\n", version)
+		fmt.Printf("ForgeGuard v%s\n", Version)
 		return 0
 	case "help", "--help", "-h":
 		printUsage()
@@ -98,10 +101,13 @@ func run() int {
 }
 
 func runScan(args []string) int {
-	scanCmd := flag.NewFlagSet("scan", flag.ExitOnError)
+	scanCmd := flag.NewFlagSet("scan", flag.ContinueOnError)
 	outputFormat := scanCmd.String("output", "text", "Output format (text, json)")
 	
-	scanCmd.Parse(args)
+	err := scanCmd.Parse(args)
+	if err != nil {
+		return 1
+	}
 
 	if scanCmd.NArg() < 1 {
 		if *outputFormat == "text" {
@@ -114,7 +120,7 @@ func runScan(args []string) int {
 	targetPath := scanCmd.Arg(0)
 	
 	if *outputFormat == "text" {
-		fmt.Print(banner)
+		fmt.Print(getBanner())
 		fmt.Printf("🔍 Scanning target: %s\n\n", targetPath)
 	}
 
