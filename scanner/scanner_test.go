@@ -146,3 +146,112 @@ jobs:
 		})
 	}
 }
+
+func TestScanData_EdgeCases(t *testing.T) {
+	tests := []struct {
+		name          string
+		yamlData      string
+		expectedRules []string
+		mustNotHave   []string
+	}{
+		{
+			name: "Multiline script with safe context",
+			yamlData: `
+name: Multiline
+jobs:
+  test:
+    steps:
+      - run: |
+          echo "This is safe"
+          echo "${{ github.sha }}"
+`,
+			expectedRules: []string{},
+			mustNotHave:   []string{"Command Injection Risk", "Environment File Injection"},
+		},
+		{
+			name: "Multiline script with unsafe context injection",
+			yamlData: `
+name: Multiline Unsafe
+jobs:
+  test:
+    steps:
+      - run: |
+          echo "Starting build..."
+          echo "${{ github.event.issue.body }}"
+          echo "Done."
+`,
+			expectedRules: []string{"Command Injection Risk"},
+			mustNotHave:   []string{},
+		},
+		{
+			name: "Secret placeholder detection bypass",
+			yamlData: `
+name: Secret Bypass
+jobs:
+  test:
+    steps:
+      - run: |
+          # This should not trigger the generic secret detector
+          echo "API_KEY=placeholder_for_api_key_here" >> $GITHUB_ENV
+          echo "TOKEN=${{ secrets.MY_TOKEN }}" >> $GITHUB_ENV
+          echo "PASSWORD=$CI_PASSWORD" >> $GITHUB_ENV
+`,
+			expectedRules: []string{},
+			mustNotHave:   []string{"Potential Hardcoded Secret"},
+		},
+		{
+			name: "True positive generic secret",
+			yamlData: `
+name: Secret True Positive
+jobs:
+  test:
+    steps:
+      - run: |
+          API_KEY="abc123XYZ456def789GHI012jkl345MNO"
+          echo "Done"
+`,
+			expectedRules: []string{"Potential Hardcoded Secret"},
+			mustNotHave:   []string{},
+		},
+		{
+			name: "Safe node version in use",
+			yamlData: `
+name: Safe Node
+jobs:
+  test:
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+`,
+			expectedRules: []string{},
+			mustNotHave:   []string{"Deprecated Action Environment (Node.js)"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			issues, err := ScanData([]byte(tt.yamlData))
+			if err != nil {
+				t.Fatalf("Unexpected error: %v", err)
+			}
+
+			foundRules := make(map[string]bool)
+			for _, issue := range issues {
+				foundRules[issue.Rule] = true
+			}
+
+			for _, expected := range tt.expectedRules {
+				if !foundRules[expected] {
+					t.Errorf("Expected rule '%s' but did not find it. Found: %v", expected, issues)
+				}
+			}
+
+			for _, notExpected := range tt.mustNotHave {
+				if foundRules[notExpected] {
+					t.Errorf("Rule '%s' was found but should not have been. Found: %v", notExpected, issues)
+				}
+			}
+		})
+	}
+}

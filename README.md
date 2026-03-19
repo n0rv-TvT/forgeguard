@@ -128,3 +128,27 @@ Contributions, issues, and feature requests are welcome!
 
 ## 📝 License
 Distributed under the MIT License. See `LICENSE` for more information.
+
+## Scanner Coverage Matrix
+
+| Vulnerability Type | Rule Name | GitHub Actions | GitLab CI | Severity |
+| :--- | :--- | :---: | :---: | :---: |
+| **Secrets** | Hardcoded AWS Key | ✅ | ✅ | CRITICAL |
+| **Secrets** | Hardcoded GitHub Token | ✅ | ❌ | CRITICAL |
+| **Secrets** | Hardcoded Slack Webhook | ✅ | ❌ | MEDIUM |
+| **Secrets** | Potential Hardcoded Secret | ✅ | ✅ | HIGH |
+| **Injection** | Command Injection Risk | ✅ | ✅ | CRITICAL |
+| **Injection** | GitHub Script Injection | ✅ | ❌ | CRITICAL |
+| **Injection** | Environment File Injection | ✅ | ❌ | HIGH |
+| **Injection** | Remote Code Execution (Curl to Bash) | ✅ | ✅ | HIGH |
+| **Dependencies** | Unpinned Action Dependency | ✅ | ❌ | HIGH |
+| **Dependencies** | Unpinned Docker Image | ❌ | ✅ | MEDIUM |
+| **Dependencies** | Unverified 3rd-Party Action | ✅ | ❌ | LOW |
+| **Environment** | Deprecated Action Environment (Node.js) | ✅ | ❌ | MEDIUM |
+| **Environment** | Deprecated Runner Commands (set-env) | ✅ | ❌ | HIGH |
+| **Triggers** | Dangerous Trigger (pull_request_target) | ✅ | ❌ | CRITICAL |
+| **Triggers** | Dangerous Trigger (workflow_run) | ✅ | ❌ | HIGH |
+| **Permissions** | Overly Permissive Tokens (write-all) | ✅ | ❌ | CRITICAL |
+| **Permissions** | Dangerous OIDC Token Permission | ✅ | ❌ | CRITICAL |
+| **Permissions** | Dangerous Token Permission (write to contents, etc) | ✅ | ❌ | HIGH |
+| **Resource Abuse**| Missing Job Timeout | ✅ | ❌ | MEDIUM |
