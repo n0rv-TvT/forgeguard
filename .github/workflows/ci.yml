@@ -51,4 +51,4 @@ jobs:
         run: go build -o forgeguard main.go
         
       - name: Run ForgeGuard on local workflows
-        run: ./forgeguard scan .github/workflows/ || echo "ForgeGuard found issues, but continuing..."
+        run: ./forgeguard scan .github/workflows/

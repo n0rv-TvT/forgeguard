@@ -152,3 +152,36 @@ Distributed under the MIT License. See `LICENSE` for more information.
 | **Permissions** | Dangerous OIDC Token Permission | ✅ | ❌ | CRITICAL |
 | **Permissions** | Dangerous Token Permission (write to contents, etc) | ✅ | ❌ | HIGH |
 | **Resource Abuse**| Missing Job Timeout | ✅ | ❌ | MEDIUM |
+
+## Configuration File
+
+ForgeGuard supports a `.forgeguard.yml` configuration file in the directory where you run the scan. You can also specify a custom path using the `-config` flag.
+
+```yaml
+# .forgeguard.yml
+
+# Paths to ignore during directory scans
+ignore_paths:
+  - ".git"
+  - "node_modules"
+  - "vendor"
+  - "*test.yml"
+
+# Rules to completely disable
+disable_rules:
+  - "Unverified 3rd-Party Action"
+  - "Unpinned Action Dependency"
+
+# Overrides for default rule severities
+severity_overrides:
+  "Missing Job Timeout": "LOW"
+```
+
+## Monitor Mode
+
+During active development of CI/CD pipelines, you can run ForgeGuard in watch mode. It will automatically rescan files when they are modified.
+
+```bash
+# Monitor a specific directory
+./forgeguard monitor .github/workflows/
+```

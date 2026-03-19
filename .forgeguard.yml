@@ -1,0 +1,17 @@
+# ForgeGuard Configuration File
+
+# Paths to ignore during directory scans
+ignore_paths:
+  - ".git"
+  - "vendor"
+  - "*test.yml"
+
+# Rules to completely disable
+disable_rules:
+  - "Unverified 3rd-Party Action"
+  - "Unpinned Action Dependency"
+  - "Dangerous Token Permission"
+
+# Overrides for default rule severities
+severity_overrides:
+  "Missing Job Timeout": "LOW"

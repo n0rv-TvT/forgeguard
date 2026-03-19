@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	"forgeguard/scanner"
+	"log"
+	"github.com/fsnotify/fsnotify"
 )
 
 // Version is injected at build time using -ldflags
@@ -59,11 +61,12 @@ func printUsage() {
 	fmt.Println("Usage: forgeguard <command> [options] <target>")
 	fmt.Println("\nCommands:")
 	fmt.Println("  scan      Scan a CI/CD configuration file or directory")
-	fmt.Println("  monitor   Monitor a directory for CI/CD configuration changes (coming soon)")
+	fmt.Println("  monitor   Monitor a directory for CI/CD configuration changes")
 	fmt.Println("  version   Print version information")
 	fmt.Println("  help      Show this help message")
 	fmt.Println("\nExamples:")
 	fmt.Println("  forgeguard scan .github/workflows/")
+	fmt.Println("  forgeguard scan -config .forgeguard.yml .")
 	fmt.Println("  forgeguard scan -output json .gitlab-ci.yml")
 }
 
@@ -79,8 +82,7 @@ func run() int {
 	case "scan":
 		return runScan(os.Args[2:])
 	case "monitor":
-		fmt.Println("🚀 The 'monitor' command is under development! Stay tuned for real-time CI/CD protection.")
-		return 0
+		return runMonitor(os.Args[2:])
 	case "version", "--version", "-v":
 		fmt.Printf("ForgeGuard v%s\n", Version)
 		return 0
@@ -100,9 +102,50 @@ func run() int {
 	}
 }
 
+func applyConfig(issues []scanner.Issue, cfg *scanner.Config) []scanner.Issue {
+	if cfg == nil {
+		return issues
+	}
+
+	var filtered []scanner.Issue
+	for _, issue := range issues {
+		disabled := false
+		for _, disabledRule := range cfg.DisableRules {
+			if strings.EqualFold(issue.Rule, disabledRule) {
+				disabled = true
+				break
+			}
+		}
+		if disabled {
+			continue
+		}
+
+		// Apply severity overrides
+		if override, ok := cfg.SeverityOverrides[issue.Rule]; ok {
+			issue.Severity = override
+		}
+		
+		filtered = append(filtered, issue)
+	}
+	return filtered
+}
+
+func isIgnored(path string, ignorePaths []string) bool {
+	for _, ignore := range ignorePaths {
+		if matched, _ := filepath.Match(ignore, filepath.Base(path)); matched {
+			return true
+		}
+		if path == ignore || strings.Contains(path, "/" + ignore + "/") || strings.HasSuffix(path, "/" + ignore) || strings.HasPrefix(path, ignore + "/") {
+			return true
+		}
+	}
+	return false
+}
+
 func runScan(args []string) int {
 	scanCmd := flag.NewFlagSet("scan", flag.ContinueOnError)
 	outputFormat := scanCmd.String("output", "text", "Output format (text, json)")
+	configFile := scanCmd.String("config", ".forgeguard.yml", "Path to config file")
 
 	err := scanCmd.Parse(args)
 	if err != nil {
@@ -119,8 +162,13 @@ func runScan(args []string) int {
 
 	targetPath := scanCmd.Arg(0)
 
+	cfg, _ := scanner.LoadConfig(*configFile)
+
 	if *outputFormat == "text" {
 		fmt.Print(getBanner())
+		if cfg != nil {
+			fmt.Printf("⚙️  Loaded config from: %s\n", *configFile)
+		}
 		fmt.Printf("🔍 Scanning target: %s\n\n", targetPath)
 	}
 
@@ -139,6 +187,14 @@ func runScan(args []string) int {
 			if err != nil {
 				return err
 			}
+			
+			if cfg != nil && isIgnored(path, cfg.IgnorePaths) {
+				if info.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+
 			// Only look for YAML files
 			if !info.IsDir() && (strings.HasSuffix(info.Name(), ".yml") || strings.HasSuffix(info.Name(), ".yaml")) {
 				filesToScan = append(filesToScan, path)
@@ -152,7 +208,9 @@ func runScan(args []string) int {
 			return 1
 		}
 	} else {
-		filesToScan = append(filesToScan, targetPath)
+		if cfg == nil || !isIgnored(targetPath, cfg.IgnorePaths) {
+			filesToScan = append(filesToScan, targetPath)
+		}
 	}
 
 	if len(filesToScan) == 0 {
@@ -189,6 +247,8 @@ func runScan(args []string) int {
 			}
 			continue
 		}
+
+		issues = applyConfig(issues, cfg)
 
 		if len(issues) > 0 {
 			totalVulnerabilities += len(issues)
@@ -251,4 +311,84 @@ func runScan(args []string) int {
 
 func main() {
 	os.Exit(run())
+}
+
+func runMonitor(args []string) int {
+	monitorCmd := flag.NewFlagSet("monitor", flag.ContinueOnError)
+	outputFormat := monitorCmd.String("output", "text", "Output format (text, json)")
+	configFile := monitorCmd.String("config", ".forgeguard.yml", "Path to config file")
+
+	err := monitorCmd.Parse(args)
+	if err != nil {
+		return 1
+	}
+
+	if monitorCmd.NArg() < 1 {
+		fmt.Println("Usage: forgeguard monitor [options] <directory>")
+		monitorCmd.PrintDefaults()
+		return 1
+	}
+
+	targetPath := monitorCmd.Arg(0)
+
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		log.Fatal("Failed to create watcher:", err)
+	}
+	defer watcher.Close()
+
+	// Walk the path to add all directories to the watcher
+	err = filepath.Walk(targetPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			err = watcher.Add(path)
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+
+	if err != nil {
+		log.Fatal("Failed to walk target path:", err)
+	}
+
+	fmt.Print(getBanner())
+	fmt.Printf("👀 Monitoring for changes in: %s\n", targetPath)
+	fmt.Println("Press Ctrl+C to stop.")
+
+	// Create a channel to wait forever
+	done := make(chan bool)
+
+	go func() {
+		for {
+			select {
+			case event, ok := <-watcher.Events:
+				if !ok {
+					return
+				}
+				// Only trigger on Write or Create for YAML files
+				if (event.Op&fsnotify.Write == fsnotify.Write || event.Op&fsnotify.Create == fsnotify.Create) {
+					if strings.HasSuffix(event.Name, ".yml") || strings.HasSuffix(event.Name, ".yaml") {
+						if *outputFormat == "text" {
+							fmt.Printf("\n🔄 Detected change in %s, rescanning...\n", event.Name)
+						}
+						// Call runScan with the specific file that changed
+						scanArgs := []string{"-output", *outputFormat, "-config", *configFile, event.Name}
+						runScan(scanArgs)
+					}
+				}
+			case err, ok := <-watcher.Errors:
+				if !ok {
+					return
+				}
+				log.Println("Error:", err)
+			}
+		}
+	}()
+
+	<-done
+	return 0
 }
