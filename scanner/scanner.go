@@ -29,16 +29,16 @@ type Job struct {
 }
 
 type Step struct {
-	Name string `yaml:"name"`
-	Uses string `yaml:"uses"`
-	Run  string `yaml:"run"`
+	Name string            `yaml:"name"`
+	Uses string            `yaml:"uses"`
+	Run  string            `yaml:"run"`
 	Env  map[string]string `yaml:"env"`
 }
 
 // Helper to check for overly permissive tokens
 func checkPermissions(perms interface{}, scope string) []Issue {
 	var issues []Issue
-	
+
 	if pStr, ok := perms.(string); ok {
 		if pStr == "write-all" {
 			issues = append(issues, Issue{
@@ -59,13 +59,17 @@ func checkPermissions(perms interface{}, scope string) []Issue {
 	return issues
 }
 
-// ScanFile parses the YAML and applies security rules
+// ScanFile reads the file and delegates to ScanData
 func ScanFile(filepath string) ([]Issue, error) {
 	data, err := os.ReadFile(filepath)
 	if err != nil {
 		return nil, err
 	}
+	return ScanData(data)
+}
 
+// ScanData parses the YAML bytes and applies security rules
+func ScanData(data []byte) ([]Issue, error) {
 	var workflow Workflow
 	if err := yaml.Unmarshal(data, &workflow); err != nil {
 		return nil, err
@@ -111,7 +115,7 @@ func ScanFile(filepath string) ([]Issue, error) {
 	for jobName, job := range workflow.Jobs {
 		// Rule 3b: Job-level Permissions Check
 		if job.Permissions != nil {
-			issues = append(issues, checkPermissions(job.Permissions, "Job '"+jobName+"'")...)
+			issues = append(issues, checkPermissions(job.Permissions, "Job '" + jobName + "'")...)
 		}
 
 		// Rule 6: Missing timeout-minutes (Cryptomining protection)
@@ -156,7 +160,7 @@ func ScanFile(filepath string) ([]Issue, error) {
 							Rule:    "Command Injection Risk",
 							Message: "Step '" + step.Name + "' evaluates untrusted context '" + ctx + "' in a shell script.\n   Risk: An attacker can submit a malicious payload to execute arbitrary code.\n   Fix: Pass the context via environment variables instead.",
 						})
-						break 
+						break
 					}
 				}
 

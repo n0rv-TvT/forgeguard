@@ -44,9 +44,9 @@ func main() {
 		if *outputFormat == "text" {
 			fmt.Println(banner)
 			fmt.Println("Usage: forgeguard [options] <path_to_workflow.yml_or_directory>")
-			fmt.Println("\nOptions:")
+			fmt.Println("Options:")
 			flag.PrintDefaults()
-			fmt.Println("\nExample: forgeguard --output json .github/workflows/")
+			fmt.Println("Example: forgeguard --output json .github/workflows/")
 		}
 		os.Exit(1)
 	}
