@@ -4,8 +4,17 @@ import (
 	"testing"
 )
 
-func TestScanData_CommandInjection(t *testing.T) {
-	yamlData := []byte(`
+func TestScanData(t *testing.T) {
+	tests := []struct {
+		name          string
+		yamlData      string
+		expectedRules []string
+		mustNotHave   []string
+		expectError   bool
+	}{
+		{
+			name: "Command Injection Risk",
+			yamlData: `
 name: Test
 on: push
 jobs:
@@ -14,28 +23,14 @@ jobs:
     steps:
       - name: Inject
         run: echo "${{ github.event.issue.title }}"
-`)
-
-	issues, err := ScanData(yamlData)
-	if err != nil {
-		t.Fatalf("Unexpected error: %v", err)
-	}
-
-	found := false
-	for _, issue := range issues {
-		if issue.Rule == "Command Injection Risk" {
-			found = true
-			break
-		}
-	}
-
-	if !found {
-		t.Error("Expected to find Command Injection Risk, but didn't")
-	}
-}
-
-func TestScanData_UnpinnedDependency(t *testing.T) {
-	yamlData := []byte(`
+`,
+			expectedRules: []string{"Command Injection Risk"},
+			mustNotHave:   []string{},
+			expectError:   false,
+		},
+		{
+			name: "Unpinned Dependency",
+			yamlData: `
 name: Test
 on: push
 jobs:
@@ -44,28 +39,14 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v3
-`)
-
-	issues, err := ScanData(yamlData)
-	if err != nil {
-		t.Fatalf("Unexpected error: %v", err)
-	}
-
-	found := false
-	for _, issue := range issues {
-		if issue.Rule == "Unpinned Action Dependency" {
-			found = true
-			break
-		}
-	}
-
-	if !found {
-		t.Error("Expected to find Unpinned Action Dependency, but didn't")
-	}
-}
-
-func TestScanData_SecureWorkflow(t *testing.T) {
-	yamlData := []byte(`
+`,
+			expectedRules: []string{"Unpinned Action Dependency"},
+			mustNotHave:   []string{},
+			expectError:   false,
+		},
+		{
+			name: "Secure Workflow",
+			yamlData: `
 name: Secure
 on: push
 permissions:
@@ -78,14 +59,89 @@ jobs:
         uses: actions/checkout@a5ac7e51b41094c92402da3b24376905380afc29
       - name: Safe run
         run: echo "Hello World"
-`)
-
-	issues, err := ScanData(yamlData)
-	if err != nil {
-		t.Fatalf("Unexpected error: %v", err)
+`,
+			expectedRules: []string{},
+			mustNotHave:   []string{"Command Injection Risk", "Unpinned Action Dependency", "Missing Job Timeout", "Overly Permissive GITHUB_TOKEN"},
+			expectError:   false,
+		},
+		{
+			name: "Workflow Run Trigger",
+			yamlData: `
+name: Target Workflow
+on:
+  workflow_run:
+    workflows: ["Untrusted Workflow"]
+    types: [completed]
+jobs:
+  test:
+    steps:
+      - run: echo "Hello"
+`,
+			expectedRules: []string{"Dangerous Trigger (workflow_run)"},
+			mustNotHave:   []string{},
+			expectError:   false,
+		},
+		{
+			name: "Github Env Injection",
+			yamlData: `
+name: Env Inject
+on: push
+jobs:
+  test:
+    steps:
+      - name: Inject
+        run: echo "VAR=${{ github.event.issue.title }}" >> $GITHUB_ENV
+`,
+			expectedRules: []string{"Environment File Injection", "Command Injection Risk"},
+			mustNotHave:   []string{},
+			expectError:   false,
+		},
+		{
+			name: "Github Script Injection",
+			yamlData: `
+name: Script Inject
+on: push
+jobs:
+  test:
+    steps:
+      - name: Inject
+        uses: actions/github-script@v6
+        with:
+          script: |
+            console.log("${{ github.event.issue.title }}")
+`,
+			expectedRules: []string{"GitHub Script Injection"},
+			mustNotHave:   []string{},
+			expectError:   false,
+		},
 	}
 
-	if len(issues) > 0 {
-		t.Errorf("Expected 0 issues for secure workflow, found %d: %v", len(issues), issues)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			issues, err := ScanData([]byte(tt.yamlData))
+
+			if (err != nil) != tt.expectError {
+				t.Fatalf("Expected error: %v, got: %v", tt.expectError, err)
+			}
+
+			foundRules := make(map[string]bool)
+			for _, issue := range issues {
+				foundRules[issue.Rule] = true
+			}
+
+			// Check expected rules are present
+			for _, rule := range tt.expectedRules {
+				if !foundRules[rule] {
+					t.Errorf("Expected to find rule '%s', but didn't", rule)
+				}
+			}
+
+			// Check must not have rules are absent
+			for _, rule := range tt.mustNotHave {
+				if foundRules[rule] {
+					t.Errorf("Expected NOT to find rule '%s', but did", rule)
+				}
+			}
+		})
 	}
 }

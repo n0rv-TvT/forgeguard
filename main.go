@@ -11,6 +11,8 @@ import (
 	"forgeguard/scanner"
 )
 
+const version = "1.0.1"
+
 const banner = `
   _____                    _____                     _ 
  |  ___|__  _ __ __ _  ___|  __ \ _   _  __ _ _ __  | |
@@ -18,7 +20,7 @@ const banner = `
  |  _| (_) | | | (_| |  __/ |__| | |_| | (_| | |    |_|
  |_|  \___/|_|  \__, |\___|_____/ \__,_|\__,_|_|    (_)
                 |___/                                  
-    CI/CD Supply Chain Security Scanner v1.0
+    CI/CD Supply Chain Security Scanner v` + version + `
 `
 
 // Output format for JSON
@@ -49,29 +51,70 @@ func printSeverity(sev string) string {
 	}
 }
 
-func main() {
-	// Define flags
-	outputFormat := flag.String("output", "text", "Output format (text, json)")
-	flag.Parse()
+func printUsage() {
+	fmt.Print(banner)
+	fmt.Println("Usage: forgeguard <command> [options] <target>")
+	fmt.Println("\nCommands:")
+	fmt.Println("  scan      Scan a CI/CD configuration file or directory")
+	fmt.Println("  monitor   Monitor a directory for CI/CD configuration changes (coming soon)")
+	fmt.Println("  version   Print version information")
+	fmt.Println("  help      Show this help message")
+	fmt.Println("\nExamples:")
+	fmt.Println("  forgeguard scan .github/workflows/")
+	fmt.Println("  forgeguard scan -output json .gitlab-ci.yml")
+}
 
-	args := flag.Args()
-
-	if len(args) < 1 {
-		if *outputFormat == "text" {
-			fmt.Println(banner)
-			fmt.Println("Usage: forgeguard [options] <path_to_workflow.yml_or_directory>")
-			fmt.Println("Options:")
-			flag.PrintDefaults()
-			fmt.Println("Example (GitHub Actions): forgeguard .github/workflows/")
-			fmt.Println("Example (GitLab CI):      forgeguard .gitlab-ci.yml")
-		}
-		os.Exit(1)
+func run() int {
+	if len(os.Args) < 2 {
+		printUsage()
+		return 1
 	}
 
-	targetPath := args[0]
+	command := os.Args[1]
+
+	switch command {
+	case "scan":
+		return runScan(os.Args[2:])
+	case "monitor":
+		fmt.Println("🚀 The 'monitor' command is under development! Stay tuned for real-time CI/CD protection.")
+		return 0
+	case "version", "--version", "-v":
+		fmt.Printf("ForgeGuard v%s\n", version)
+		return 0
+	case "help", "--help", "-h":
+		printUsage()
+		return 0
+	default:
+		// Check if it's a legacy invocation (e.g. `forgeguard .github/workflows/`)
+		if !strings.HasPrefix(command, "-") {
+			fmt.Printf("⚠️  Warning: Implicit 'scan' command is deprecated. Please use 'forgeguard scan %s'\n\n", strings.Join(os.Args[1:], " "))
+			return runScan(os.Args[1:])
+		}
+		
+		fmt.Printf("Unknown command: %s\n", command)
+		printUsage()
+		return 1
+	}
+}
+
+func runScan(args []string) int {
+	scanCmd := flag.NewFlagSet("scan", flag.ExitOnError)
+	outputFormat := scanCmd.String("output", "text", "Output format (text, json)")
+	
+	scanCmd.Parse(args)
+
+	if scanCmd.NArg() < 1 {
+		if *outputFormat == "text" {
+			fmt.Println("Usage: forgeguard scan [options] <path_to_workflow.yml_or_directory>")
+			scanCmd.PrintDefaults()
+		}
+		return 1
+	}
+
+	targetPath := scanCmd.Arg(0)
 	
 	if *outputFormat == "text" {
-		fmt.Println(banner)
+		fmt.Print(banner)
 		fmt.Printf("🔍 Scanning target: %s\n\n", targetPath)
 	}
 
@@ -80,7 +123,7 @@ func main() {
 		if *outputFormat == "text" {
 			fmt.Printf("❌ Error accessing path: %v\n", err)
 		}
-		os.Exit(1)
+		return 1
 	}
 
 	var filesToScan []string
@@ -100,7 +143,7 @@ func main() {
 			if *outputFormat == "text" {
 				fmt.Printf("❌ Error walking directory: %v\n", err)
 			}
-			os.Exit(1)
+			return 1
 		}
 	} else {
 		filesToScan = append(filesToScan, targetPath)
@@ -112,7 +155,7 @@ func main() {
 		} else {
 			fmt.Println("{}")
 		}
-		os.Exit(1)
+		return 1
 	}
 
 	totalVulnerabilities := 0
@@ -178,8 +221,14 @@ func main() {
 		}
 	} else {
 		fmt.Printf("\n📊 Scan Complete. Total files: %d | Total vulnerabilities found: %d\n", len(filesToScan), totalVulnerabilities)
-		if totalVulnerabilities > 0 {
-			os.Exit(1)
-		}
 	}
+
+	if totalVulnerabilities > 0 {
+		return 1
+	}
+	return 0
+}
+
+func main() {
+	os.Exit(run())
 }

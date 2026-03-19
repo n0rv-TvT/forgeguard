@@ -1,52 +1,106 @@
 # 🛡️ ForgeGuard
-![Build Status](https://img.shields.io/github/actions/workflow/status/yourusername/forgeguard/ci.yml?branch=main)
+![Build Status](https://img.shields.io/github/actions/workflow/status/n0rv-TvT/forgeguard/ci.yml?branch=main)
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 
-**ForgeGuard** is an open-source DevSecOps Command-Line Interface (CLI) tool written in Go. It statically analyzes GitHub Actions workflow files (`.github/workflows/*.yml`) to detect supply chain vulnerabilities, misconfigurations, and hardcoded secrets.
+## Overview
+**ForgeGuard** is an open-source DevSecOps Command-Line Interface (CLI) tool written in Go. It statically analyzes CI/CD pipeline configurations (GitHub Actions and GitLab CI) to detect supply chain vulnerabilities, security misconfigurations, and hardcoded secrets.
 
-## 🎯 What it Detects (Current Rules)
-1. **Unpinned Dependencies:** Action runners relying on moving tags (e.g., `@v3` or `@master`) instead of immutable SHA hashes.
-2. **Command Injection Risks:** Untrusted GitHub contexts (like PR titles) executed directly inside bash `run` blocks.
-3. **Overly Permissive Tokens:** Global or job-level `write-all` or `contents: write` permissions.
-4. **Remote Code Execution:** Inline scripts using `curl | bash` without checksum verification.
-5. **Dangerous Triggers:** Workflows utilizing `pull_request_target` which can lead to repository compromise.
-6. **Missing Timeouts:** Jobs lacking `timeout-minutes`, mitigating risk of cryptomining abuse.
-7. **Deprecated Commands:** Use of legacy commands like `::set-env` that allow standard out injection.
-8. **Hardcoded Secrets:** Detection of hardcoded AWS Access Keys (`AKIA...`) and other tokens/passwords directly in the workflow files.
+**Real-World Use Cases:**
+- **Prevent Supply Chain Attacks:** Detect unpinned dependencies or 3rd-party actions that could be compromised via repository hijacking.
+- **CI/CD Hardening:** Catch dangerous defaults like `pull_request_target` or overly permissive `GITHUB_TOKEN`s that could lead to repository compromise.
+- **Secret Scanning:** Find hardcoded AWS keys, GitHub PATs, and Slack webhooks before they get merged into your main branch.
+- **CTF & Bug Bounty:** Useful tool for identifying pipeline vulnerabilities during security assessments.
 
-## 🚀 Getting Started
+## Demo
+
+```text
+$ forgeguard scan .github/workflows/deploy.yml
+
+  _____                    _____                     _ 
+ |  ___|__  _ __ __ _  ___|  __ \ _   _  __ _ _ __  | |
+ | |_ / _ \| '__/ _` |/ _ \ |  \/| | | |/ _` | '__| | |
+ |  _| (_) | | | (_| |  __/ |__| | |_| | (_| | |    |_|
+ |_|  \___/|_|  \__, |\___|_____/ \__,_|\__,_|_|    (_)
+                |___/                                  
+    CI/CD Supply Chain Security Scanner v1.0.1
+    
+🔍 Scanning target: .github/workflows/deploy.yml
+
+🛑 Found 3 vulnerabilities in [GitHub CI]: .github/workflows/deploy.yml
+------------------------------------------------
+1. [CRITICAL] Command Injection Risk
+   Step 'Print Issue Title' evaluates untrusted context 'github.event.issue.title' in a shell script.
+   Risk: An attacker can submit a malicious payload to execute arbitrary code.
+------------------------------------------------
+2. [HIGH] Unpinned Action Dependency
+   Step 'Checkout code' uses unpinned action 'actions/checkout@v3'.
+   Fix: Pin dependencies to a full 40-character commit SHA.
+------------------------------------------------
+3. [MEDIUM] Missing Job Timeout
+   Job 'build' lacks 'timeout-minutes'.
+   Risk: If compromised or hung, attackers can run cryptominers on your runner for up to 6 hours.
+------------------------------------------------
+
+📊 Scan Complete. Total files: 1 | Total vulnerabilities found: 3
+```
+
+## Features
+- **Fast Static Analysis:** Parse YAML files locally in milliseconds. No network requests required.
+- **Multi-Platform Support:** Analyzes both `.github/workflows/*.yml` and `.gitlab-ci.yml` out of the box.
+- **Configurable Output:** Supports colorful terminal output for human consumption, and `JSON` output for pipeline automation.
+- **Safe Parsing:** Built-in safeguards against maliciously crafted CI configurations (e.g., file size limits to prevent YAML bombs).
+- **No Unsafe Execution:** Analyzes code purely through AST/Regex matching; does not eval or execute untrusted inputs.
+
+## Security Model (Threat Model)
+
+**What ForgeGuard PROTECTS against:**
+*   **Pipeline Injection:** Context evaluation vulnerabilities (e.g., untrusted `${{ github.event.issue.title }}` inside `run` blocks).
+*   **Dependency Hijacking:** Detection of unpinned dependencies (using moving tags like `@v3` instead of specific SHAs).
+*   **Privilege Escalation:** Overly permissive `GITHUB_TOKEN` declarations (`write-all`).
+*   **Runner Abuse:** Lack of job timeouts leading to potential cryptomining if the runner is compromised.
+*   **Dangerous Triggers:** Catching configurations like `pull_request_target` combined with code checkout.
+*   **Secret Leakage:** Simple pattern matching for high-risk tokens (AWS, GitHub, Slack) explicitly placed in YAML.
+
+**What ForgeGuard DOES NOT protect against:**
+*   **Runtime Logic Flaws:** ForgeGuard is a *static* analyzer. It does not monitor the actual execution of the pipeline or analyze bash scripts stored in external `.sh` files.
+*   **External Vulnerabilities:** It will not find vulnerabilities in the application code itself, only in the CI/CD configuration files.
+*   **Sophisticated Obfuscation:** If secrets are split into multiple variables, encoded, or heavily obfuscated, the Regex scanner may miss them.
+
+## Installation
 
 ### Prerequisites
 - [Go](https://golang.org/dl/) (1.20 or newer)
 
-### Installation
 Clone this repository and compile the binary:
 ```bash
-git clone https://github.com/yourusername/forgeguard.git
+git clone https://github.com/n0rv-TvT/forgeguard.git
 cd forgeguard
 go mod tidy
 make build
 ```
 
-### Usage
-Run the scanner against a single workflow YAML file or an entire directory:
+## Usage
+
+The CLI uses a command-based structure. 
+
 ```bash
 # Scan a single file
-./forgeguard test-workflow.yml
+./forgeguard scan test-workflow.yml
 
 # Scan an entire directory
-./forgeguard .github/workflows/
+./forgeguard scan .github/workflows/
 
-# Output as JSON for integration with other tools
-./forgeguard --output json test-workflow.yml
+# Output as JSON for integration with other DevSecOps tools
+./forgeguard scan -output json test-workflow.yml
+
+# Print help menu
+./forgeguard help
 ```
 
-### Cross-Compilation (Releases)
-You can easily compile ForgeGuard for Linux, Windows, and macOS using the included Makefile:
-```bash
-make cross-compile
-```
-*(Binaries will be output to the `build/` directory).*
+## Limitations
+*   Currently primarily focused on GitHub Actions, with expanding coverage for GitLab CI.
+*   Deep remote repository scanning is not yet implemented (must run against a cloned local repository).
+*   Does not evaluate custom composite actions that are stored in external repositories.
 
 ## 🤝 Contributing
 Contributions, issues, and feature requests are welcome! 
