@@ -1,0 +1,21 @@
+name: "Vulnerable CI/CD Pipeline"
+on: [issues]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      # VULNERABILITY 1: Unpinned Dependency
+      # An attacker who hacks the 'actions' org could push a malicious v3 tag.
+      - name: Checkout code
+        uses: actions/checkout@v3
+        
+      # VULNERABILITY 2: Command Injection
+      # An attacker can name their issue: `"; cat /etc/passwd; echo "` to run commands!
+      - name: Print Issue Title
+        run: |
+          echo "Processing issue: ${{ github.event.issue.title }}"
+          
+      # SECURE EXAMPLE: Pinned by hash
+      - name: Setup Node
+        uses: actions/setup-node@60edb5dd545a775178f525247833159c03af0c39
