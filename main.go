@@ -30,6 +30,7 @@ type ScanReport struct {
 
 type Result struct {
 	File   string          `json:"file"`
+	Type   string          `json:"type"` // GitHub or GitLab
 	Issues []scanner.Issue `json:"issues"`
 }
 
@@ -61,7 +62,8 @@ func main() {
 			fmt.Println("Usage: forgeguard [options] <path_to_workflow.yml_or_directory>")
 			fmt.Println("Options:")
 			flag.PrintDefaults()
-			fmt.Println("Example: forgeguard --output json .github/workflows/")
+			fmt.Println("Example (GitHub Actions): forgeguard .github/workflows/")
+			fmt.Println("Example (GitLab CI):      forgeguard .gitlab-ci.yml")
 		}
 		os.Exit(1)
 	}
@@ -88,6 +90,7 @@ func main() {
 			if err != nil {
 				return err
 			}
+			// Only look for YAML files
 			if !info.IsDir() && (strings.HasSuffix(info.Name(), ".yml") || strings.HasSuffix(info.Name(), ".yaml")) {
 				filesToScan = append(filesToScan, path)
 			}
@@ -116,10 +119,24 @@ func main() {
 	var jsonResults []Result
 
 	for _, file := range filesToScan {
-		issues, err := scanner.ScanFile(file)
-		if err != nil {
+		var issues []scanner.Issue
+		var scanErr error
+		var ciType string
+
+		// Auto-detect based on filename or path
+		fileName := filepath.Base(file)
+		if fileName == ".gitlab-ci.yml" || fileName == "test-gitlab-ci.yml" || strings.Contains(file, ".gitlab") {
+			issues, scanErr = scanner.ScanGitlabFile(file)
+			ciType = "GitLab"
+		} else {
+			// Default to GitHub Actions
+			issues, scanErr = scanner.ScanFile(file)
+			ciType = "GitHub"
+		}
+
+		if scanErr != nil {
 			if *outputFormat == "text" {
-				fmt.Printf("⚠️  Skipping %s (Error parsing YAML)\n", file)
+				fmt.Printf("⚠️  Skipping %s (Error parsing YAML: %v)\n", file, scanErr)
 			}
 			continue
 		}
@@ -130,10 +147,11 @@ func main() {
 			if *outputFormat == "json" {
 				jsonResults = append(jsonResults, Result{
 					File:   file,
+					Type:   ciType,
 					Issues: issues,
 				})
 			} else {
-				fmt.Printf("🛑 Found %d vulnerabilities in: %s\n", len(issues), file)
+				fmt.Printf("🛑 Found %d vulnerabilities in [%s CI]: %s\n", len(issues), ciType, file)
 				fmt.Println("------------------------------------------------")
 				for i, res := range issues {
 					fmt.Printf("%d. %s %s\n", i+1, printSeverity(res.Severity), res.Rule)
@@ -143,7 +161,7 @@ func main() {
 			}
 		} else {
 			if *outputFormat == "text" {
-				fmt.Printf("✅ %s is secure.\n", file)
+				fmt.Printf("✅ %s ([%s CI]) is secure.\n", file, ciType)
 			}
 		}
 	}
@@ -161,7 +179,7 @@ func main() {
 	} else {
 		fmt.Printf("\n📊 Scan Complete. Total files: %d | Total vulnerabilities found: %d\n", len(filesToScan), totalVulnerabilities)
 		if totalVulnerabilities > 0 {
-			os.Exit(1) // Return non-zero exit code if vulnerabilities found (useful for CI/CD)
+			os.Exit(1)
 		}
 	}
 }
