@@ -32,10 +32,10 @@ type Job struct {
 }
 
 type Step struct {
-	Name string            `yaml:"name"`
-	Uses string            `yaml:"uses"`
-	Run  string            `yaml:"run"`
-	Env  map[string]string `yaml:"env"`
+	Name string                 `yaml:"name"`
+	Uses string                 `yaml:"uses"`
+	Run  string                 `yaml:"run"`
+	Env  map[string]string      `yaml:"env"`
 	With map[string]interface{} `yaml:"with"`
 }
 
@@ -202,7 +202,7 @@ func ScanData(data []byte) ([]Issue, error) {
 						}
 					}
 				}
-				
+
 				if !strings.HasPrefix(step.Uses, "actions/") && !strings.HasPrefix(step.Uses, "github/") && !strings.HasPrefix(step.Uses, "aws-actions/") && !strings.HasPrefix(step.Uses, "azure/") {
 					issues = append(issues, Issue{
 						Rule:     "Unverified 3rd-Party Action",

@@ -42,7 +42,7 @@ func ScanGitlabData(data []byte) ([]Issue, error) {
 	curlBashRegex := regexp.MustCompile(`(?i)(curl|wget).*\|\s*(bash|sh)`)
 
 	contentStr := string(data)
-	
+
 	// Rule: Hardcoded Secrets globally in file
 	if awsKeyRegex.MatchString(contentStr) {
 		issues = append(issues, Issue{
@@ -77,7 +77,7 @@ func ScanGitlabData(data []byte) ([]Issue, error) {
 			if scriptInterface == nil {
 				return
 			}
-			
+
 			// Scripts can be a single string or a list of strings in GitLab
 			var scripts []string
 			if sList, ok := scriptInterface.([]interface{}); ok {

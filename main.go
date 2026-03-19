@@ -28,9 +28,9 @@ func getBanner() string {
 
 // Output format for JSON
 type ScanReport struct {
-	FilesScanned          int      `json:"files_scanned"`
-	TotalVulnerabilities  int      `json:"total_vulnerabilities"`
-	Results               []Result `json:"results"`
+	FilesScanned         int      `json:"files_scanned"`
+	TotalVulnerabilities int      `json:"total_vulnerabilities"`
+	Results              []Result `json:"results"`
 }
 
 type Result struct {
@@ -44,11 +44,11 @@ func printSeverity(sev string) string {
 	case "CRITICAL":
 		return "\033[1;31m[CRITICAL]\033[0m" // Bold Red
 	case "HIGH":
-		return "\033[31m[HIGH]\033[0m"     // Red
+		return "\033[31m[HIGH]\033[0m" // Red
 	case "MEDIUM":
-		return "\033[33m[MEDIUM]\033[0m"   // Yellow
+		return "\033[33m[MEDIUM]\033[0m" // Yellow
 	case "LOW":
-		return "\033[36m[LOW]\033[0m"      // Cyan
+		return "\033[36m[LOW]\033[0m" // Cyan
 	default:
 		return "[" + sev + "]"
 	}
@@ -93,7 +93,7 @@ func run() int {
 			fmt.Printf("⚠️  Warning: Implicit 'scan' command is deprecated. Please use 'forgeguard scan %s'\n\n", strings.Join(os.Args[1:], " "))
 			return runScan(os.Args[1:])
 		}
-		
+
 		fmt.Printf("Unknown command: %s\n", command)
 		printUsage()
 		return 1
@@ -103,7 +103,7 @@ func run() int {
 func runScan(args []string) int {
 	scanCmd := flag.NewFlagSet("scan", flag.ContinueOnError)
 	outputFormat := scanCmd.String("output", "text", "Output format (text, json)")
-	
+
 	err := scanCmd.Parse(args)
 	if err != nil {
 		return 1
@@ -118,7 +118,7 @@ func runScan(args []string) int {
 	}
 
 	targetPath := scanCmd.Arg(0)
-	
+
 	if *outputFormat == "text" {
 		fmt.Print(getBanner())
 		fmt.Printf("🔍 Scanning target: %s\n\n", targetPath)
@@ -192,7 +192,7 @@ func runScan(args []string) int {
 
 		if len(issues) > 0 {
 			totalVulnerabilities += len(issues)
-			
+
 			if *outputFormat == "json" {
 				jsonResults = append(jsonResults, Result{
 					File:   file,
