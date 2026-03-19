@@ -7,7 +7,7 @@ all: build
 
 build:
 	@echo "🔨 Building $(APP_NAME)..."
-	@go build -o $(APP_NAME) main.go
+	@go build -o $(APP_NAME) .
 	@echo "✅ Build complete!"
 
 clean:
@@ -17,13 +17,13 @@ clean:
 
 test:
 	@echo "🧪 Running tests..."
-	@go run main.go test-workflow.yml
+	@go test -v ./...
 
 cross-compile:
 	@echo "🌍 Compiling for multiple platforms..."
 	@mkdir -p $(BUILD_DIR)
-	@GOOS=linux GOARCH=amd64 go build -o $(BUILD_DIR)/$(APP_NAME)-linux-amd64 main.go
-	@GOOS=darwin GOARCH=amd64 go build -o $(BUILD_DIR)/$(APP_NAME)-darwin-amd64 main.go
-	@GOOS=darwin GOARCH=arm64 go build -o $(BUILD_DIR)/$(APP_NAME)-darwin-arm64 main.go
-	@GOOS=windows GOARCH=amd64 go build -o $(BUILD_DIR)/$(APP_NAME)-windows-amd64.exe main.go
+	@GOOS=linux GOARCH=amd64 go build -o $(BUILD_DIR)/$(APP_NAME)-linux-amd64 .
+	@GOOS=darwin GOARCH=amd64 go build -o $(BUILD_DIR)/$(APP_NAME)-darwin-amd64 .
+	@GOOS=darwin GOARCH=arm64 go build -o $(BUILD_DIR)/$(APP_NAME)-darwin-arm64 .
+	@GOOS=windows GOARCH=amd64 go build -o $(BUILD_DIR)/$(APP_NAME)-windows-amd64.exe .
 	@echo "✅ Cross-compilation complete! Check the '$(BUILD_DIR)' directory."
