@@ -33,6 +33,21 @@ type Result struct {
 	Issues []scanner.Issue `json:"issues"`
 }
 
+func printSeverity(sev string) string {
+	switch sev {
+	case "CRITICAL":
+		return "\033[1;31m[CRITICAL]\033[0m" // Bold Red
+	case "HIGH":
+		return "\033[31m[HIGH]\033[0m"     // Red
+	case "MEDIUM":
+		return "\033[33m[MEDIUM]\033[0m"   // Yellow
+	case "LOW":
+		return "\033[36m[LOW]\033[0m"      // Cyan
+	default:
+		return "[" + sev + "]"
+	}
+}
+
 func main() {
 	// Define flags
 	outputFormat := flag.String("output", "text", "Output format (text, json)")
@@ -121,7 +136,7 @@ func main() {
 				fmt.Printf("🛑 Found %d vulnerabilities in: %s\n", len(issues), file)
 				fmt.Println("------------------------------------------------")
 				for i, res := range issues {
-					fmt.Printf("%d. [%s]\n", i+1, res.Rule)
+					fmt.Printf("%d. %s %s\n", i+1, printSeverity(res.Severity), res.Rule)
 					fmt.Printf("   %s\n", res.Message)
 					fmt.Println("------------------------------------------------")
 				}
@@ -145,5 +160,8 @@ func main() {
 		}
 	} else {
 		fmt.Printf("\n📊 Scan Complete. Total files: %d | Total vulnerabilities found: %d\n", len(filesToScan), totalVulnerabilities)
+		if totalVulnerabilities > 0 {
+			os.Exit(1) // Return non-zero exit code if vulnerabilities found (useful for CI/CD)
+		}
 	}
 }

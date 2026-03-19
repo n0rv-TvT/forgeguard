@@ -1,7 +1,9 @@
 package scanner
 
 import (
+	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -10,8 +12,9 @@ import (
 
 // Issue represents a detected vulnerability
 type Issue struct {
-	Rule    string `json:"rule"`
-	Message string `json:"message"`
+	Rule     string `json:"rule"`
+	Severity string `json:"severity"`
+	Message  string `json:"message"`
 }
 
 // Workflow represents the structure of a GitHub Actions YAML
@@ -35,6 +38,29 @@ type Step struct {
 	Env  map[string]string `yaml:"env"`
 }
 
+// Check remote repository for vulnerable files or workflows
+func FetchRemoteRepo(repoURL string) (string, error) {
+	// Simple implementation to fetch default branch default file for demonstration
+	// In a real scenario, we'd use the GitHub API to clone or read a tree
+	
+	if !strings.HasPrefix(repoURL, "https://github.com/") {
+		return "", fmt.Errorf("only GitHub URLs are supported currently")
+	}
+
+	// Create a temp directory
+	tempDir, err := os.MkdirTemp("", "forgeguard-remote-*")
+	if err != nil {
+		return "", err
+	}
+
+	// Let's just create a dummy file there for now to demonstrate the concept,
+	// because fetching dynamic trees without an API key is heavily rate limited by GitHub.
+	// We'll write a warning to the user indicating API integration is needed for full remote scanning.
+	
+	err = os.WriteFile(filepath.Join(tempDir, "remote_warning.txt"), []byte("Note: Deep remote scanning requires GitHub API integration."), 0644)
+	return tempDir, err
+}
+
 // Helper to check for overly permissive tokens
 func checkPermissions(perms interface{}, scope string) []Issue {
 	var issues []Issue
@@ -42,16 +68,18 @@ func checkPermissions(perms interface{}, scope string) []Issue {
 	if pStr, ok := perms.(string); ok {
 		if pStr == "write-all" {
 			issues = append(issues, Issue{
-				Rule:    "Overly Permissive Tokens",
-				Message: scope + " has 'permissions: write-all'.\n   Risk: Compromised runner can overwrite code, releases, and packages.\n   Fix: Use principle of least privilege (e.g., 'contents: read').",
+				Rule:     "Overly Permissive Tokens",
+				Severity: "CRITICAL",
+				Message:  scope + " has 'permissions: write-all'.\n   Risk: Compromised runner can overwrite code, releases, and packages.\n   Fix: Use principle of least privilege (e.g., 'contents: read').",
 			})
 		}
 	} else if pMap, ok := perms.(map[string]interface{}); ok {
 		for k, v := range pMap {
 			if v == "write" && (k == "contents" || k == "packages" || k == "security-events" || k == "actions") {
 				issues = append(issues, Issue{
-					Rule:    "Dangerous Token Permission",
-					Message: scope + " has 'permissions: " + k + ": write'.\n   Risk: Grants write access to critical repository components.\n   Fix: Ensure this workflow strictly requires write access.",
+					Rule:     "Dangerous Token Permission",
+					Severity: "HIGH",
+					Message:  scope + " has 'permissions: " + k + ": write'.\n   Risk: Grants write access to critical repository components.\n   Fix: Ensure this workflow strictly requires write access.",
 				})
 			}
 		}
@@ -85,14 +113,26 @@ func ScanData(data []byte) ([]Issue, error) {
 	contentStr := string(data)
 	if awsKeyRegex.MatchString(contentStr) {
 		issues = append(issues, Issue{
-			Rule:    "Hardcoded AWS Key",
-			Message: "Found a hardcoded AWS Access Key (AKIA...) in the workflow file.\n   Risk: Anyone who can read this repo can compromise your AWS environment.\n   Fix: Move this to GitHub Secrets and reference it via ${{ secrets.AWS_KEY }}.",
+			Rule:     "Hardcoded AWS Key",
+			Severity: "CRITICAL",
+			Message:  "Found a hardcoded AWS Access Key (AKIA...) in the workflow file.\n   Risk: Anyone who can read this repo can compromise your AWS environment.\n   Fix: Move this to GitHub Secrets and reference it via ${{ secrets.AWS_KEY }}.",
 		})
 	}
 	if passwordRegex.MatchString(contentStr) {
 		issues = append(issues, Issue{
-			Rule:    "Potential Hardcoded Secret",
-			Message: "Found a potential hardcoded password/token/secret in the workflow file.\n   Risk: Hardcoding secrets leads to accidental leaks and credential theft.\n   Fix: Move this to GitHub Secrets.",
+			Rule:     "Potential Hardcoded Secret",
+			Severity: "HIGH",
+			Message:  "Found a potential hardcoded password/token/secret in the workflow file.\n   Risk: Hardcoding secrets leads to accidental leaks and credential theft.\n   Fix: Move this to GitHub Secrets.",
+		})
+	}
+
+	// Rule 9: 3rd Party Actions using node12/node16 (Deprecated Environments)
+	nodeRegex := regexp.MustCompile(`(?i)setup-node@v[123]`)
+	if nodeRegex.MatchString(contentStr) {
+		issues = append(issues, Issue{
+			Rule:     "Deprecated Action Environment (Node.js)",
+			Severity: "MEDIUM",
+			Message:  "Found usage of deprecated setup-node versions.\n   Risk: Older Node.js versions have unpatched vulnerabilities.\n   Fix: Upgrade to setup-node@v4 or newer.",
 		})
 	}
 
@@ -105,8 +145,9 @@ func ScanData(data []byte) ([]Issue, error) {
 	onBytes, _ := yaml.Marshal(workflow.On)
 	if strings.Contains(string(onBytes), "pull_request_target") {
 		issues = append(issues, Issue{
-			Rule:    "Dangerous Trigger (pull_request_target)",
-			Message: "Workflow triggers on 'pull_request_target'.\n   Risk: Runs with elevated privileges and secret access. If you checkout untrusted PR code, attackers can steal secrets.\n   Fix: Require approval for external contributors or use 'pull_request' instead.",
+			Rule:     "Dangerous Trigger (pull_request_target)",
+			Severity: "CRITICAL",
+			Message:  "Workflow triggers on 'pull_request_target'.\n   Risk: Runs with elevated privileges and secret access. If you checkout untrusted PR code, attackers can steal secrets.\n   Fix: Require approval for external contributors or use 'pull_request' instead.",
 		})
 	}
 
@@ -121,8 +162,9 @@ func ScanData(data []byte) ([]Issue, error) {
 		// Rule 6: Missing timeout-minutes (Cryptomining protection)
 		if job.TimeoutMinutes == 0 {
 			issues = append(issues, Issue{
-				Rule:    "Missing Job Timeout",
-				Message: "Job '" + jobName + "' lacks 'timeout-minutes'.\n   Risk: If compromised or hung, attackers can run cryptominers on your runner for up to 6 hours.\n   Fix: Add 'timeout-minutes: 15' (or appropriate limit).",
+				Rule:     "Missing Job Timeout",
+				Severity: "MEDIUM",
+				Message:  "Job '" + jobName + "' lacks 'timeout-minutes'.\n   Risk: If compromised or hung, attackers can run cryptominers on your runner for up to 6 hours.\n   Fix: Add 'timeout-minutes: 15' (or appropriate limit).",
 			})
 		}
 
@@ -136,11 +178,21 @@ func ScanData(data []byte) ([]Issue, error) {
 						matched, _ := regexp.MatchString(`^[a-fA-F0-9]{40}$`, version)
 						if !matched {
 							issues = append(issues, Issue{
-								Rule:    "Unpinned Action Dependency",
-								Message: "Step '" + step.Name + "' uses unpinned action '" + step.Uses + "'.\n   Risk: If the action owner is compromised, malicious code can be injected into your build.\n   Fix: Pin dependencies to a full 40-character commit SHA.",
+								Rule:     "Unpinned Action Dependency",
+								Severity: "HIGH",
+								Message:  "Step '" + step.Name + "' uses unpinned action '" + step.Uses + "'.\n   Risk: If the action owner is compromised, malicious code can be injected into your build.\n   Fix: Pin dependencies to a full 40-character commit SHA.",
 							})
 						}
 					}
+				}
+				
+				// Rule 10: Untrusted / Unverified 3rd Party Actions
+				if !strings.HasPrefix(step.Uses, "actions/") && !strings.HasPrefix(step.Uses, "github/") && !strings.HasPrefix(step.Uses, "aws-actions/") && !strings.HasPrefix(step.Uses, "azure/") {
+					issues = append(issues, Issue{
+						Rule:     "Unverified 3rd-Party Action",
+						Severity: "LOW",
+						Message:  "Step '" + step.Name + "' uses '" + step.Uses + "' which is not a highly-trusted organization.\n   Risk: 3rd party actions run with the permissions of your workflow.\n   Fix: Audit the action's source code or use a verified publisher.",
+					})
 				}
 			}
 
@@ -157,8 +209,9 @@ func ScanData(data []byte) ([]Issue, error) {
 				for _, ctx := range untrustedContexts {
 					if strings.Contains(step.Run, "${{") && strings.Contains(step.Run, ctx) {
 						issues = append(issues, Issue{
-							Rule:    "Command Injection Risk",
-							Message: "Step '" + step.Name + "' evaluates untrusted context '" + ctx + "' in a shell script.\n   Risk: An attacker can submit a malicious payload to execute arbitrary code.\n   Fix: Pass the context via environment variables instead.",
+							Rule:     "Command Injection Risk",
+							Severity: "CRITICAL",
+							Message:  "Step '" + step.Name + "' evaluates untrusted context '" + ctx + "' in a shell script.\n   Risk: An attacker can submit a malicious payload to execute arbitrary code.\n   Fix: Pass the context via environment variables instead.",
 						})
 						break
 					}
@@ -167,16 +220,18 @@ func ScanData(data []byte) ([]Issue, error) {
 				// Rule 4: Dangerous Curl to Bash
 				if curlBashRegex.MatchString(step.Run) {
 					issues = append(issues, Issue{
-						Rule:    "Remote Code Execution (Curl to Bash)",
-						Message: "Step '" + step.Name + "' downloads and executes a script directly via pipe.\n   Risk: If the remote server is compromised or MITM'd, you will execute malware.\n   Fix: Download the script, verify its SHA256 checksum, then execute it.",
+						Rule:     "Remote Code Execution (Curl to Bash)",
+						Severity: "HIGH",
+						Message:  "Step '" + step.Name + "' downloads and executes a script directly via pipe.\n   Risk: If the remote server is compromised or MITM'd, you will execute malware.\n   Fix: Download the script, verify its SHA256 checksum, then execute it.",
 					})
 				}
 
 				// Rule 7: Deprecated set-env / add-path commands
 				if strings.Contains(step.Run, "::set-env") || strings.Contains(step.Run, "::add-path") {
 					issues = append(issues, Issue{
-						Rule:    "Deprecated Runner Commands",
-						Message: "Step '" + step.Name + "' uses deprecated 'set-env' or 'add-path'.\n   Risk: These commands are vulnerable to stdout command injection.\n   Fix: Write to $GITHUB_ENV or $GITHUB_PATH instead.",
+						Rule:     "Deprecated Runner Commands",
+						Severity: "HIGH",
+						Message:  "Step '" + step.Name + "' uses deprecated 'set-env' or 'add-path'.\n   Risk: These commands are vulnerable to stdout command injection.\n   Fix: Write to $GITHUB_ENV or $GITHUB_PATH instead.",
 					})
 				}
 			}
