@@ -10,8 +10,8 @@ import (
 
 // Issue represents a detected vulnerability
 type Issue struct {
-	Rule    string
-	Message string
+	Rule    string `json:"rule"`
+	Message string `json:"message"`
 }
 
 // Workflow represents the structure of a GitHub Actions YAML
@@ -32,6 +32,7 @@ type Step struct {
 	Name string `yaml:"name"`
 	Uses string `yaml:"uses"`
 	Run  string `yaml:"run"`
+	Env  map[string]string `yaml:"env"`
 }
 
 // Helper to check for overly permissive tokens
@@ -71,6 +72,25 @@ func ScanFile(filepath string) ([]Issue, error) {
 	}
 
 	var issues []Issue
+
+	// Regex for secrets (AWS Keys, Passwords, etc)
+	awsKeyRegex := regexp.MustCompile(`(?i)AKIA[0-9A-Z]{16}`)
+	passwordRegex := regexp.MustCompile(`(?i)(password|passwd|secret|token|api_key)\s*[:=]\s*['"]?[a-zA-Z0-9\-_]{8,}['"]?`)
+
+	// Rule 8: Hardcoded Secrets globally in file
+	contentStr := string(data)
+	if awsKeyRegex.MatchString(contentStr) {
+		issues = append(issues, Issue{
+			Rule:    "Hardcoded AWS Key",
+			Message: "Found a hardcoded AWS Access Key (AKIA...) in the workflow file.\n   Risk: Anyone who can read this repo can compromise your AWS environment.\n   Fix: Move this to GitHub Secrets and reference it via ${{ secrets.AWS_KEY }}.",
+		})
+	}
+	if passwordRegex.MatchString(contentStr) {
+		issues = append(issues, Issue{
+			Rule:    "Potential Hardcoded Secret",
+			Message: "Found a potential hardcoded password/token/secret in the workflow file.\n   Risk: Hardcoding secrets leads to accidental leaks and credential theft.\n   Fix: Move this to GitHub Secrets.",
+		})
+	}
 
 	// Rule 3: Global Permissions Check
 	if workflow.Permissions != nil {

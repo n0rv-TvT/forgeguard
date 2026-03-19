@@ -1,6 +1,8 @@
 package main
 
 import (
+	"encoding/json"
+	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -19,21 +21,48 @@ const banner = `
     CI/CD Supply Chain Security Scanner v1.0
 `
 
+// Output format for JSON
+type ScanReport struct {
+	FilesScanned          int      `json:"files_scanned"`
+	TotalVulnerabilities  int      `json:"total_vulnerabilities"`
+	Results               []Result `json:"results"`
+}
+
+type Result struct {
+	File   string          `json:"file"`
+	Issues []scanner.Issue `json:"issues"`
+}
+
 func main() {
-	if len(os.Args) < 2 {
-		fmt.Println(banner)
-		fmt.Println("Usage: forgeguard <path_to_workflow.yml_or_directory>")
-		fmt.Println("Example: forgeguard .github/workflows/")
+	// Define flags
+	outputFormat := flag.String("output", "text", "Output format (text, json)")
+	flag.Parse()
+
+	args := flag.Args()
+
+	if len(args) < 1 {
+		if *outputFormat == "text" {
+			fmt.Println(banner)
+			fmt.Println("Usage: forgeguard [options] <path_to_workflow.yml_or_directory>")
+			fmt.Println("\nOptions:")
+			flag.PrintDefaults()
+			fmt.Println("\nExample: forgeguard --output json .github/workflows/")
+		}
 		os.Exit(1)
 	}
 
-	targetPath := os.Args[1]
-	fmt.Println(banner)
-	fmt.Printf("🔍 Scanning target: %s\n\n", targetPath)
+	targetPath := args[0]
+	
+	if *outputFormat == "text" {
+		fmt.Println(banner)
+		fmt.Printf("🔍 Scanning target: %s\n\n", targetPath)
+	}
 
 	fileInfo, err := os.Stat(targetPath)
 	if err != nil {
-		fmt.Printf("❌ Error accessing path: %v\n", err)
+		if *outputFormat == "text" {
+			fmt.Printf("❌ Error accessing path: %v\n", err)
+		}
 		os.Exit(1)
 	}
 
@@ -50,7 +79,9 @@ func main() {
 			return nil
 		})
 		if err != nil {
-			fmt.Printf("❌ Error walking directory: %v\n", err)
+			if *outputFormat == "text" {
+				fmt.Printf("❌ Error walking directory: %v\n", err)
+			}
 			os.Exit(1)
 		}
 	} else {
@@ -58,32 +89,61 @@ func main() {
 	}
 
 	if len(filesToScan) == 0 {
-		fmt.Println("❌ No YAML files found to scan.")
+		if *outputFormat == "text" {
+			fmt.Println("❌ No YAML files found to scan.")
+		} else {
+			fmt.Println("{}")
+		}
 		os.Exit(1)
 	}
 
 	totalVulnerabilities := 0
+	var jsonResults []Result
 
 	for _, file := range filesToScan {
-		results, err := scanner.ScanFile(file)
+		issues, err := scanner.ScanFile(file)
 		if err != nil {
-			fmt.Printf("⚠️  Skipping %s (Error parsing YAML)\n", file)
+			if *outputFormat == "text" {
+				fmt.Printf("⚠️  Skipping %s (Error parsing YAML)\n", file)
+			}
 			continue
 		}
 
-		if len(results) > 0 {
-			fmt.Printf("🛑 Found %d vulnerabilities in: %s\n", len(results), file)
-			fmt.Println("------------------------------------------------")
-			for i, res := range results {
-				fmt.Printf("%d. [%s]\n", i+1, res.Rule)
-				fmt.Printf("   %s\n", res.Message)
+		if len(issues) > 0 {
+			totalVulnerabilities += len(issues)
+			
+			if *outputFormat == "json" {
+				jsonResults = append(jsonResults, Result{
+					File:   file,
+					Issues: issues,
+				})
+			} else {
+				fmt.Printf("🛑 Found %d vulnerabilities in: %s\n", len(issues), file)
 				fmt.Println("------------------------------------------------")
+				for i, res := range issues {
+					fmt.Printf("%d. [%s]\n", i+1, res.Rule)
+					fmt.Printf("   %s\n", res.Message)
+					fmt.Println("------------------------------------------------")
+				}
 			}
-			totalVulnerabilities += len(results)
 		} else {
-			fmt.Printf("✅ %s is secure.\n", file)
+			if *outputFormat == "text" {
+				fmt.Printf("✅ %s is secure.\n", file)
+			}
 		}
 	}
 
-	fmt.Printf("\n📊 Scan Complete. Total files: %d | Total vulnerabilities found: %d\n", len(filesToScan), totalVulnerabilities)
+	if *outputFormat == "json" {
+		report := ScanReport{
+			FilesScanned:         len(filesToScan),
+			TotalVulnerabilities: totalVulnerabilities,
+			Results:              jsonResults,
+		}
+		jsonBytes, err := json.MarshalIndent(report, "", "  ")
+		if err == nil {
+			fmt.Println(string(jsonBytes))
+		}
+	} else {
+		fmt.Printf("\n📊 Scan Complete. Total files: %d | Total vulnerabilities found: %d\n", len(filesToScan), totalVulnerabilities)
+	}
 }
