@@ -9,15 +9,26 @@ import (
 	"forgeguard/scanner"
 )
 
+const banner = `
+  _____                    _____                     _ 
+ |  ___|__  _ __ __ _  ___|  __ \ _   _  __ _ _ __  | |
+ | |_ / _ \| '__/ _` + "`" + ` |/ _ \ |  \/| | | |/ _` + "`" + ` | '__| | |
+ |  _| (_) | | | (_| |  __/ |__| | |_| | (_| | |    |_|
+ |_|  \___/|_|  \__, |\___|_____/ \__,_|\__,_|_|    (_)
+                |___/                                  
+    CI/CD Supply Chain Security Scanner v1.0
+`
+
 func main() {
 	if len(os.Args) < 2 {
+		fmt.Println(banner)
 		fmt.Println("Usage: forgeguard <path_to_workflow.yml_or_directory>")
 		fmt.Println("Example: forgeguard .github/workflows/")
 		os.Exit(1)
 	}
 
 	targetPath := os.Args[1]
-	fmt.Printf("🛡️  ForgeGuard - CI/CD Supply Chain Scanner\n")
+	fmt.Println(banner)
 	fmt.Printf("🔍 Scanning target: %s\n\n", targetPath)
 
 	fileInfo, err := os.Stat(targetPath)
@@ -74,5 +85,5 @@ func main() {
 		}
 	}
 
-	fmt.Printf("\n📊 Scan Complete. Total vulnerabilities found: %d\n", totalVulnerabilities)
+	fmt.Printf("\n📊 Scan Complete. Total files: %d | Total vulnerabilities found: %d\n", len(filesToScan), totalVulnerabilities)
 }
